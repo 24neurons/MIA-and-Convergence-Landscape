@@ -1,0 +1,4 @@
+torch=1.13.1
+numpy=1.17.2
+pickle=4.0
+pandas=0.25.1
