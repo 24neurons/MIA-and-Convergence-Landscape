@@ -1,1 +1,2 @@
-from . import resnet
+from .resnet import * 
+from .vgg import *

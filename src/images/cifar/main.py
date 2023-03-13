@@ -26,7 +26,8 @@ def parse_arguments():
     parser.add_argument('--dataset', type=str, help="Name of the dataset", default='CIFAR100',
                         choices=['CIFAR100', 'CIFAR10', 'FashionMNIST'])
     parser.add_argument('--target_model', type=str, help="Name of the target model architecture", 
-                        default='resnet20', choices=['resnet20', 'resnet50', 'vgg19'])
+                        default='resnet20', choices=['resnet20', 'resnet50',  'vgg11', 'vgg11_bn', 'vgg13', 
+                                                     'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19',])
     parser.add_argument('--target_size', type=int, help="Number of training samples for target model")
     parser.add_argument('--target_lr', type=int, help="Learning rate of target model")
     parser.add_argument('--target_epoch', type=int, help="Epochs of the target model", default=50)
