@@ -34,4 +34,4 @@ python3 main.py \
 
 - The following target_model are supported: 
   `'resnet20', 'resnet50',  'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19'`
-The following attack_model are supported: `'NN'`
+- The following attack_model are supported: `'NN'`
