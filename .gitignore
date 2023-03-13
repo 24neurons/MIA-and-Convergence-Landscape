@@ -21,7 +21,7 @@ ipython_config.py
 __pycache__/
 *.py[cod]
 *$py.class
-
+venv/
 # C extensions
 *.so
 
