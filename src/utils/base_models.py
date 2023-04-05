@@ -1,58 +1,110 @@
+"""
+This module contains all the base class wrapper for three types of models:
+target model, shadow model, attack model
+"""
+from copy import deepcopy
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from torch.utils.data import Dataset
+from torchmetrics.classification import BinaryAccuracy
 
 from tqdm.auto import tqdm
-from copy import deepcopy
 import numpy as np
 
-from helper import *
+from .helper import gather_inference, CustomDataset, train_step, test_step
 
-__all__ = ['TargetModel', 'ShadowModel', 'BaseAttacker']
 
 class TargetModel:
     def __init__(self, base_target):
+        """
+        The target model wrapper for base target model
+        Attributes: 
+            tg (nn.Module): The target model to be attacked
+            trainloader (DataLoader): The dataloader for training dataset
+            testloader (TestLoader):The testdataloader for test dataset
+        """
         self.tg = base_target
         self.trainloader = None
         self.testloader = None
-    def set_dataloader(self, X, y):
-        
-        data_size = len(X) // 2
-        print(data_size)
-        X_train, y_train = X[0:data_size] , y[0:data_size]
-        X_test, y_test = X[data_size:], y[data_size:]
+    def set_dataloader(self, X, y, partition = 0.5):
+        """
+        Setting dataloader for target model 
+        Args: 
+            X: The input data for model as a float32 tensor of shape [n_samples, (input shapes)]
+            y: The label data for model as a float32 tensor of shape [n_samples, (label shapes)]
+        """
+        train_size = len(X) * partition
+
+        X_train, y_train = X[0:train_size] , y[0:train_size]
+        X_test, y_test = X[train_size:], y[train_size:]
 
         trainset = CustomDataset(X_train, y_train)
         testset = CustomDataset(X_test, y_test)
 
         self.trainloader = DataLoader(trainset, batch_size = 4)
         self.testloader = DataLoader(testset, batch_size = 4)
-    def _fit(self, X, y, epochs, lr):
+    def _fit(self, X, y, epochs=20, lr=0.02, partition=0.5):
+        """
+        Fitting the model on specific dataset with specified epochs and learning rate
+        Args:
+            X (torch.Tensor): The input data as a tensor of shape [n_samples , (input_shape)]
+            y (torch.Tensor):The label data as a tensor of shape [n_samples , (label_shape)]
+            epochs (int): The number of epochs that this model should be trained for, default is 20
+            lr (torch.float32): The constant learning rate for the model
 
-        self.set_dataloader(X, y)
+        Returns: None. Only log the loss and accuracy to the console. 
+        """
+        # First, setting the dataloader for training and testing data
+        self.set_dataloader(X, y, partition)
         
         loss_fn = nn.CrossEntropyLoss()
+        metric_score_fn = BinaryAccuracy()
         optimizer = torch.optim.SGD(self.tg.parameters(), lr=lr)
 
+        #training data in epochs
         for _ in tqdm(range(epochs)):
-            self.tg , trainloss = train_step(self.tg, self.trainloader, loss_fn,
-                                             optimizer)
-            testloss = test_step(self.tg, self.testloader, loss_fn)
+            self.tg , train_loss, train_acc = train_step(self.tg, self.trainloader, loss_fn,
+                                                        metric_score_fn, optimizer)
+            test_loss, test_acc = test_step(self.tg, self.testloader, loss_fn, metric_score_fn)
 
-            print(f"Training on Epochs {_} | Train loss: {trainloss} | Test loss {testloss}")
+            print(f"Training on Epochs {_} | Train loss: {train_loss} | Test loss {test_loss}")
+            print(f"Train Accuracy: {train_acc} | Test accuracy {test_acc}")
     def _transform(self):
-        in_true_label, in_pred_label = gatherInference(self.tg, self.trainloader)
-        out_true_label, out_pred_label = gatherInference(self.tg, self.testloader)
-        return (in_true_label, in_pred_label, out_true_label, out_pred_label)
-    def fitTransform(self, X, y, epochs, lr):
+        """
+        Gathering model inference of the provided data along with the true label of provided data.
+        All the true label Tensor are in one-hot encoding format.
+        Returns:
+            in_true_label (torch.Tensor): True label of member data, shape [n_train_samples, n_classes]
+            in_pred_label (torch.Tensor): Pred label of member data, shape [n_train_samples, n_classes]
+            out_true_label (torch.Tensor): True label of non-member data, shape [n_test_samples, n_classes]
+            out_true_label (torch.Tensor): Pred label of non-member data, shape [n_test_samples, n_classes] 
+        """
 
-        self._fit(X, y, epochs, lr)
+        in_true_label, in_pred_label = gather_inference(self.tg, self.trainloader)
+        out_true_label, out_pred_label = gather_inference(self.tg, self.testloader)
+        return (in_true_label, in_pred_label, out_true_label, out_pred_label)
+    def fit_transform(self, X, y, epochs, lr, partition=0.5):
+        """
+        Train model on dataset and generate attack datata for attack model
+        Args:
+            X (torch.Tensor): Input data with shape [n_samples, (input_shape)]
+            y (torch.Tesnor): Label data with shape [n_samples, n_classes]
+            epochs (int): number of epochs the target model should be trained for
+            lr (torch.float32): learning rate of the model 
+            partition (torch.float32): The ratio of training samples versus whole datset
+        Returns:
+            attack (dict): a dict of key : (pred, membership_status) with
+                        -key: True label 
+                        -pred: model prediction of that instance
+                        -membership_status: 1 if that instance was used to be trained, 0 otherwise 
+        """
+        self._fit(X, y, epochs, lr,partition)
 
         (in_true_label, in_pred_label, 
          out_true_label, out_pred_label) = self._transform()
 
-        unique_labels = torch.unique(in_true_label) 
+        # Get all the unique labels in int form
+        unique_labels = torch.arange(len(X))
 
         prediction = {}
         attack_data = {}
@@ -63,7 +115,7 @@ class TargetModel:
             out_indices = (out_true_label == c_label)
             out_pred = out_pred_label[out_indices]
 
-            prediction[c_label.item()] = (in_pred, out_pred) 
+            prediction[c_label] = (in_pred, out_pred) 
         
         for key, (In, Out) in prediction.items():
             attack_test_X = torch.cat((In, Out))
@@ -87,7 +139,7 @@ class ShadowModel:
                 target_model (nn.Module): The target model original architecture
                 nModels (int): The number of shadow models inside 
             Attributes:
-                listOfModels (list): list of different shadow models
+                list_of_models (list): list of different shadow models
                 numOfModels (int) : the number of shadow models
 
                 trainloaders (list): list of train dataloader for each model
@@ -95,10 +147,10 @@ class ShadowModel:
                 seed (int): random seed for training sample split
                 rdst (np.random.RandomState): random state constructed by seed
         """
-        self.listOfModels = []
+        self.list_of_models = []
         for i in range(nModels):
             c_model = deepcopy(target_model)
-            self.listOfModels.append(c_model)
+            self.list_of_models.append(c_model)
         self.numOfModels   = nModels
 
         self.trainloaders  = []
@@ -115,7 +167,7 @@ class ShadowModel:
            Every shadow models have the same kind of architecture
            but different weights
         """
-        for model in self.listOfModels:
+        for model in self.list_of_models:
             model._init_weights()
     def set_dataloader(self, X , y, train_size):
         total_length = len(X)
@@ -159,8 +211,9 @@ class ShadowModel:
 
         for model_idx in range(self.numOfModels):
 
-            model = self.listOfModels[model_idx]
+            model = self.list_of_models[model_idx]
             loss_fn = torch.nn.CrossEntropyLoss()
+            metric_score_fn = BinaryAccuracy()
             optimizer = torch.optim.SGD(model.parameters() , lr = 0.001)
             trainloader_idx = self.trainloaders[model_idx]
             testloader_idx = self.testloaders[model_idx]
@@ -168,15 +221,15 @@ class ShadowModel:
             train_losses = []
             test_losses = []
             for _ in tqdm(range(epochs)):
-                model, train_loss = train_step(model, trainloader_idx,loss_fn,
-                                               optimizer)
-                test_loss = test_step(model, testloader_idx, loss_fn)
+                model, train_loss, train_acc = train_step(model, trainloader_idx,loss_fn,
+                                               metric_score_fn, optimizer)
+                test_loss, test_acc = test_step(model, testloader_idx, metric_score_fn, loss_fn)
 
                 train_losses.append(train_loss)
                 test_losses.append(test_loss)
             
             print(f"Finished training model {model_idx}")
-            self.listOfModels[model_idx] = model
+            self.list_of_models[model_idx] = model
             self.train_losses += np.array(train_losses)
             self.test_losses  += np.array(test_losses)
 
@@ -212,18 +265,18 @@ class ShadowModel:
 
         # Get the labeled data ("in" , "out") for the attacker
         for model_idx in range(self.numOfModels):
-            model = self.listOfModels[model_idx]
+            model = self.list_of_models[model_idx]
 
-            trainLoader = self.trainloaders[model_idx]
-            testLoader = self.testloaders[model_idx]
+            trainloader = self.trainloaders[model_idx]
+            testloader = self.testloaders[model_idx]
 
-            inTrueLabel , inPredLabel = gatherInference(model, trainLoader)
-            outTrueLabel , outPredLabel = gatherInference(model, testLoader)
+            in_true_label , in_pred_label = gather_inference(model, trainloader)
+            out_true_label , out_pred_label = gather_inference(model, testloader)
 
-            shadow_in_true_label.append(inTrueLabel)
-            shadow_in_prediction.append(inPredLabel)
-            shadow_out_true_label.append(outTrueLabel)
-            shadow_out_prediction.append(outPredLabel)
+            shadow_in_true_label.append(in_true_label)
+            shadow_in_prediction.append(in_pred_label)
+            shadow_out_true_label.append(out_true_label)
+            shadow_out_prediction.append(out_pred_label)
         
         shadow_in_true_label = torch.cat(shadow_in_true_label)
         shadow_in_prediction = torch.cat(shadow_in_prediction)
@@ -284,11 +337,11 @@ class ShadowModel:
 
 
 
-class BaseAttacker:
+class AttackModel:
     """
        The attacker class used to attack the target model
     """
-    def __init__(self, baseModel, num_classes):
+    def __init__(self, base_attacker, num_classes):
         """Constructing attack models
 
             Args: 
@@ -296,17 +349,17 @@ class BaseAttacker:
                                               models inherit from
             Attributes:
                 baseModel (torch.nn) : The baseline architecture of an attacker
-                listOfModels (list) : the list of different attacker models used on different 
+                list_of_models (list) : the list of different attacker models used on different 
                                       classes                 
 
         """
-        self.listOfModels = []
-        self.baseModel = baseModel
+        self.list_of_models = []
+        self.base_model = base_attacker
         self.num_classes = num_classes
 
         for _ in range(num_classes):
-            cur_model = deepcopy(self.baseModel)
-            self.listOfModels.append(cur_model)
+            cur_model = deepcopy(self.base_model)
+            self.list_of_models.append(cur_model)
 
     def fit(self, attack_train_data, num_classes, epochs):
         """Training attack models on shadow model's labeled output
@@ -322,7 +375,7 @@ class BaseAttacker:
         # Train each attack model seperately
         for cur_class in range(num_classes):
 
-            cur_model = self.listOfModels[cur_class]
+            cur_model = self.list_of_models[cur_class]
 
             if cur_class in attack_train_data.keys():
 
@@ -334,13 +387,14 @@ class BaseAttacker:
                                                shuffle = True)
                 # 2. Preparing loss function and optimizer
                 loss_fn = nn.CrossEntropyLoss()
+                metric_score_fn = BinaryAccuracy()
                 optimizer = torch.optim.SGD(cur_model.parameters(), lr = 0.001)
 
                 # 3. Train current model on shadow model's membership data
                 for _ in range(epochs):
-                    cur_model, train_loss= train_step(cur_model, train_dataloader, loss_fn, optimizer)
+                    cur_model, train_loss, train_acc= train_step(cur_model, train_dataloader, loss_fn, metric_score_fn, optimizer)
 
-            self.listOfModels.append(cur_model)
+            self.list_of_models.append(cur_model)
     def predict_membership_prob(self, target_pred, true_class):
         """Predicting membership probability of a single sample
             Args:
@@ -354,7 +408,7 @@ class BaseAttacker:
                                       training sample
         """
         # The logits of the attacker model prediction
-        membership_logits = self.listOfModels[true_class](target_pred)
+        membership_logits = self.list_of_models[true_class](target_pred)
         # The probability of the attacker model prediction
         membership_prob = nn.Sigmoid()(membership_logits)
         return membership_prob

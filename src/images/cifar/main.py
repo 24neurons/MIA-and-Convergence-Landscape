@@ -2,9 +2,10 @@ import os
 import sys
 import random
 
+
 import numpy as np
 import argparse
-from models import * 
+from models import *
 from tqdm.auto import tqdm
 import torch
 from torch import nn
@@ -15,24 +16,26 @@ from torch.utils.data import DataLoader
 
 FILE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_ROOT = os.path.join(FILE_DIR , "data/")
+UTILS_ROOT = os.path.dirname(os.path.dirname(FILE_DIR))
 sys.path.append(DATA_ROOT)
+sys.path.append(UTILS_ROOT)
 
-from ...utils import *
-################################################################################
-# save and read argument parsers
-################################################################################
+
+from utils import PerceptronNN, TargetModel, ShadowModel, BaseAttacker, CustomDataset, train_step, test_step, gather_inference
+###############################################################################
+###############################################################################
 def parse_arguments():
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--dataset', type=str, help="Name of the dataset", default='CIFAR100',
-                        choices=['CIFAR100', 'CIFAR10', 'FashionMNIST'])
+                        choices=['CIFAR100', 'CIFAR10', 'FashionMNIST'])                         
     parser.add_argument('--target_model', type=str, help="Name of the target model architecture", 
                         default='resnet20', choices=['resnet20', 'resnet50',  'vgg11', 'vgg11_bn', 'vgg13', 
                                                      'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19',])
     parser.add_argument('--target_size', type=int, help="Number of training samples for target model")
-    parser.add_argument('--target_lr', type=int, help="Learning rate of target model")
+    parser.add_argument('--target_lr', type=float, help="Learning rate of target model")
     parser.add_argument('--target_epoch', type=int, help="Epochs of the target model", default=50)
     parser.add_argument('--attack_model', type=str, help="Name of the base attack model architecture",
-                        default='NN', choices=['NN'])
+                        default='PerceptronNN', choices=['PerceptronNN'])
     args = parser.parse_args()
     
     return args
@@ -40,7 +43,7 @@ def parse_arguments():
 ################################################################################
 # attacker class with target model, shadow model and a base attacker
 ################################################################################
-class Attacker():
+class FullAttacker():
     def __init__(self, args):
         self.args = args 
         self.data_root = os.path.join(DATA_ROOT, self.args.dataset)
@@ -113,16 +116,15 @@ class Attacker():
         
         
 
-################################################################################
+###################################################################
 # main driver of attack
-################################################################################
+###################################################################
 
 def main():
     args = parse_arguments()
-    attacker = Attacker(args)
+    attacker = FullAttacker(args)
     attacker.run_attacks()
 
 if __name__ == '__main__':
     main()
-
     
