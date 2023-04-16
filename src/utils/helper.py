@@ -5,6 +5,13 @@ including training/testing step, custom dataset, etc.
 import torch
 from torch.utils.data import Dataset
 
+"""
+This module is mainly supporting tools for all the types of model,
+including training/testing step, custom dataset, etc.
+"""
+import torch
+from torch.utils.data import Dataset
+
 class CustomDataset(Dataset):
     """
     A custom torch Dataset that allows iteration through two rela=ted tensors: input and label
@@ -34,7 +41,7 @@ class CustomDataset(Dataset):
         return (self.X[idx] , self.y[idx])
 
 
-def train_step(model, trainloader, loss_fn, metric_score_fn, optimizer):
+def train_step(model, trainloader, loss_fn, optimizer, index=None):
     """
     This function trains a model in one epoch
     Args:
@@ -42,30 +49,52 @@ def train_step(model, trainloader, loss_fn, metric_score_fn, optimizer):
         trainloader (DataLoader): The training set DataLoader for the target model
         loss_fn : The objective function that the model is configured to minimize
         optimnizer: The gradient stepping optimizer for the model
-        metric_score_fn: The metric that is used to measure the accuracy, can be F1_score, F2... 
+        metric_score_fn: The metric that is used to measure the accuracy, can be F1_score, F2...
+        index: 
+            None: The model shall be trained on the whole training data
+            int: The model shall be trained on the index-th single batch
     Returns:
-        model (nn.Module): The resuling model after one epoch of training
-        train_loss (torch.float32): The training loss of this model over the entire training dataset on this epoch
-        train_acc (torch.float32):The training score over the entire training dataset
+        If index is None:
+            model (nn.Module): The resuling model after one epoch of training
+            train_loss (torch.float32): The training loss of this model over the entire 
+                                        training dataset on this epoch
+            train_acc (torch.float32):The training score over the entire training dataset
+        If index is int:
+            model (nn.Module): The resulting model after training on one sample
     """
     model.train()
     train_loss, train_acc = 0,0
-    for (X, y) in trainloader:
+    if index is None:
+        for batch_idx, (X, y) in enumerate(trainloader):
+            X, y = X.to("cuda"), y.to("cuda")
+            optimizer.zero_grad()
+            pred = model(X).squeeze(dim = 1)
+
+            batch_loss = loss_fn(pred, y)
+            train_loss += batch_loss.item()
+            batch_loss.backward()
+            optimizer.step()
+            
+            batch_acc = accuracy_fn(pred, y)
+
+            train_acc += batch_acc.item()
+#             pbar.set_description(desc=f'Loss={batch_loss} Batch_id={batch_idx} Accuracy={100*correct/total:0.2f}')
+    else:
+        #1. Training on a single data
+        X, y = trainloader.dataset[index]
         X, y = X.to("cuda"), y.to("cuda")
         optimizer.zero_grad()
         pred = model(X).squeeze(dim = 1)
 
         batch_loss = loss_fn(pred, y)
-        train_loss += batch_loss.item()
-        train_acc += metric_score_fn(pred, y).item()
-
         batch_loss.backward()
         optimizer.step()
-
+        
+        return model
     train_loss /= len(trainloader)
     train_acc /= len(trainloader)
     return model, train_loss, train_acc
-def test_step(model, testloader, loss_fn, metric_score_fn):
+def test_step(model, testloader, loss_fn):
     """
     This function calculate the test error of a model
     Args:
@@ -80,8 +109,10 @@ def test_step(model, testloader, loss_fn, metric_score_fn):
         for (X,y) in testloader:
             X, y = X.to("cuda"), y.to("cuda")
             pred = model(X).squeeze(dim = 1)
+            
             test_loss += loss_fn(pred, y).item()
-            test_acc += metric_score_fn(pred, y).item()
+            test_acc += accuracy_fn(pred,y).item()
+            
         test_loss /= len(testloader)
         test_acc /= len(testloader)
     return test_loss, test_acc
@@ -119,4 +150,22 @@ def gather_inference(model, dataloader):
     input_labels = torch.cat(input_labels, dim = 0)
 
     return (input_labels, pred_labels)
-    
+def accuracy_fn(pred, y):
+    """
+    Calculate the accuracy of the model
+    Args:
+        pred (torch.Tensor): The prediction of the model
+        y (torch.Tensor): The true label of the dataset
+    Returns:
+        acc (torch.float32): The accuracy of the model
+    """
+    # if y has more than two labels
+    if len(y.shape) > 1:
+        pred_label = pred.argmax(dim = 1)
+        y_label = y.argmax(dim = 1)
+    # if y has only two labels
+    else:
+        pred_label = torch.round(pred)
+        y_label = y
+    acc = ((pred_label == y_label).sum()/len(y_label)).float()
+    return acc

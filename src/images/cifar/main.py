@@ -13,6 +13,9 @@ from torch.utils.data import Dataset
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+from torchvision.transforms import ToTensor
+
 
 FILE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_ROOT = os.path.join(FILE_DIR , "data/")
@@ -21,7 +24,7 @@ sys.path.append(DATA_ROOT)
 sys.path.append(UTILS_ROOT)
 
 
-from utils import PerceptronNN, TargetModel, ShadowModel, BaseAttacker, CustomDataset, train_step, test_step, gather_inference
+from utils import NNTwoLayers, TargetModel, ShadowModel, AttackModel, train_step, test_step
 ###############################################################################
 ###############################################################################
 def parse_arguments():
@@ -33,9 +36,7 @@ def parse_arguments():
                                                      'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19',])
     parser.add_argument('--target_size', type=int, help="Number of training samples for target model")
     parser.add_argument('--target_lr', type=float, help="Learning rate of target model")
-    parser.add_argument('--target_epoch', type=int, help="Epochs of the target model", default=50)
-    parser.add_argument('--attack_model', type=str, help="Name of the base attack model architecture",
-                        default='PerceptronNN', choices=['PerceptronNN'])
+    parser.add_argument('--target_epoch', type=int, help="Epochs of the target model", default=100)
     args = parser.parse_args()
     
     return args
@@ -53,67 +54,101 @@ class FullAttacker():
         elif self.args.dataset == "CIFAR10":
             self.num_classes = 10
 
-        target_model = globals()[self.args.target_model](num_classes = self.num_classes)
-        attack_model = globals()[self.args.attack_model](num_classes = self.num_classes)
+        target_model_archiecture = globals()[self.args.target_model]
+        attack_model_architecture = globals()[self.args.attack_model]
 
-        self.tm = TargetModel(target_model)
-        self.sm = ShadowModel(target_model, num_shadow_models = 5)
-        self.at = BaseAttacker(attack_model, num_classes = self.num_classes)
-        self._set_data()
+        self.tm = TargetModel(target_model_archiecture, num_classes = self.num_classes)
+        self.sm = ShadowModel(target_model_archiecture, num_classes = self.num_classes)
+        self.at = AttackModel(attack_model_architecture, num_classes = self.num_classes)
+        self._data_preprocess()
+        self._divide_data()
 
-    def _set_data(self):
+    def _data_preprocess(self):
         if self.args.dataset == "CIFAR100":
             self.dataset = datasets.CIFAR100
             
         elif self.args.dataset == "CIFAR10":
             self.dataset = datasets.CIFAR10
-        
-        label_transform = lambda y : torch.zeros(self.num_classes, dtype = torch.float).scatter_(dim = 0, index = torch.tensor(y) , value = 1)
+        transform_train = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
 
-        trainset = self.dataset(root=self.data_root, train=True, transform=ToTensor(), download=True,
-                                       target_transform=label_transform)
-        testset = self.dataset(root=self.data_root, train=False, transform=ToTensor(), download=True,
-                                       target_transform=label_transform)
-        fullset = trainset + testset
-        
-        target_indicies = random.choices(np.arange(self.train_size), k= 2*self.args.target_size)
+        transform_test = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
 
-        shadow_indicies = set(range(self.dataset_size)) - set(target_indicies)
-        
-        fullloader = DataLoader(fullset, batch_size = 4, shuffle=True)
+        self.train_set = self.dataset(self.data_root, train=True, download=True, transform=transform_train)
+        self.test_set = self.dataset(self.data_root, train=False, download=True, transform=transform_test)
 
-        for (X, y) in fullset:
-            fullset_X = X
-            fullset_y = y
-        
-        self.target_X, self.target_y = fullset_X[target_indicies], fullset_y[target_indicies]
-        self.shadow_X, self.shadow_y = fullset_X[shadow_indicies], fullset_X[shadow_indicies]
+        # Taking the images tensor
+        X_train, X_test = torch.tensor(self.train_set.data, dtype=torch.float32).permute(0,3,1,2)/255 , torch.tensor(self.test_set.data,dtype=torch.float32).permute(0,3,1,2)/255
 
+        # Taking the target in tensor of (N,) shape
+        y_train_label, y_test_label =  torch.tensor(self.train_dataset.targets, dtype=torch.int64), torch.tensor(self.test_set.targets, dtype=torch.int64)
+
+        # Converting label into one-hot encoding 
+        y_train, y_test = torch.nn.functional.one_hot(y_train_label, 10).to(torch.float32), torch.nn.functional.one_hot(y_test_label,10).to(torch.float32)
+
+        #Concat them into one dataset
+        self.X = torch.cat((X_train , X_test))
+        self.y = torch.cat((y_train, y_test))
+    def _divide_data(self):
+
+        target_size = self.args.target_size
+
+        # Divide the data into target and shadow
+        target_indices = np.random.choice(range(len(self.X)), target_size, replace=False)
+        shadow_indices = np.array(list(set(range(len(self.X))) - set(target_indices)))
+
+        self.target_X, self.target_y = self.X[target_indices], self.y[target_indices]
+        self.shadow_X, self.shadow_y = self.X[shadow_indices], self.y[shadow_indices]
     
     def run_attacks(self):
 
+        tg_train_losses, tg_test_losses = [], []
+        
         # 1. Train shadow models and generate data for attacker
-        attack_train = self.sm.fitTransform(self.shadow_X, self.shadow_y, self.args.target_epoch, self.args.target_lr)
+        shadow_attack_data = self.sm.fit_transform(self.shadow_X, self.shadow_y, self.args.target_epoch)
+        # 2. Train attacker model based on shadow models labeled data, default 50 epochs
+        self.at.fit(shadow_attack_data, 50)
+        # 3. Evaluate the attacker model on target model per each epoch
 
-        # 2. Fitting the attacker
-        self.at.fit(attack_train, self.num_classes, 40) 
+        for _ in range(self.args.target_epoch):
+            # 3.1 Train target model and generate data for attacker
+            target_attack_data = self.tm.fit_transform(self.target_X, self.target_y, 1, self.args.target_lr)
+            # 3.2 Evaluating target model accuracy 
+            loss_fn = nn.CrossEntropyLoss()
 
-        # 3. Testing attacker accuracy on different epochs of target model 
+            with torch.no_grad():
+                tg_train_loss, tg_train_acc = test_step(self.tm.tg, self.tm.trainloader, loss_fn)
+                tg_test_loss, tg_test_acc = test_step(self.tm.tg, self.tm.testloader, loss_fn)
+                print(f"Target model train loss: {tg_train_loss:.4f} | train acc: {tg_train_acc:.4f} | test loss: {tg_test_loss:.4f} | test acc: {tg_test_acc:.4f}")
+                tg_train_losses.append(tg_train_loss)
+                tg_test_losses.append(tg_test_loss)
 
-        for _ in tqdm(range(self.args.target_epochs)):
+            # 3.3 Estimating model sharpness on current weights
+            sharpness = self.tg.estimate_sharpness()
+            print(f"Sharpness: {sharpness:.4f}")
 
-            # 3.1 Train target model and getting attack test data 
-            attack_test = self.tg.fitTransform(self.target_X, self.target_y, 1, self.args.target_lr)
-
-            # 3.2 Predict target membership 
-            target_membership = self.at.get_membership(attack_test)
-            test_acc, test_recall = self.at.eval(attack_test)
-
-            print(f"Attacking on epoch {_} of target model | Acc: {test_acc } | Recall: {test_recall}")
+            # 3.4 Evaluating the attacker model on target model 
+            attack_acc = self.at.eval(target_attack_data)
+            print(f"With learning rate {self.args.target_lr}, attacking on epoch {_}, with accuracy {attack_acc:.4f}")
+            
+            # 3.5 If the model is reaching plateau, then stop training
+                
+            if _ > 20 : # if trained for more than 20 epochs
+                max_recent_loss = max(tg_train_losses[-20:])
+                min_recent_loss = min(tg_test_losses[-20:])
+                if(max_recent_loss - min_recent_loss < 1e-2):
+                    # Stop training in this learning rate
+                    print(f"Stop training target model at epoch {_}")
+                    break
         
-        
-
-        
+            
         
 
 ###################################################################
