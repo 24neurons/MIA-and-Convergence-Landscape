@@ -15,17 +15,17 @@ This project is an experiment on membership attack against machine learning mode
   I.e TargetModel(ResNet20) with ResNet20 being the base target model
   This class functions in these sequential steps
 
-* Inserting dataset with format (input, label), both input and label has the type of torch.Tensor
-* Training target model on train_set
-* Generating attack data (using both train_set and test_set) for the attack model in the form
-  (pred, membership_status) with membership_status being 1 if it is training sample, 0 otherwise
-* Estimating sharpness of the target model:
-  This function randomly choose 5-20 samples from the training set.
-  On each random samples, train the model further, getting the weights and loss values of the new model.
-  Calculate the sharpness of the model on current weight with the formula :
-  ```math
-  sharpness = \frac{\text{increases_in_loss}}{\text{increases_in_weight}}
-  ```
+  * Inserting dataset with format (input, label), both input and label has the type of torch.Tensor
+  * Training target model on train_set
+  * Generating attack data (using both train_set and test_set) for the attack model in the form
+    (pred, membership_status) with membership_status being 1 if it is training sample, 0 otherwise
+  * Estimating sharpness of the target model:
+    This function randomly choose 5-20 samples from the training set.
+    On each random samples, train the model further, getting the weights and loss values of the new model.
+    Calculate the sharpness of the model on current weight with the formula :
+    ```math
+    sharpness = \frac{\text{increases in loss}}{\text{increases in weight}}
+    ```
 2. [```ShadowModel```](src/utils/base_models.py): A shadow model wrapper for a list of shadow models (nModels), with the same architecture with base target model
   This class also functions in similar manner with the TargetModel, only that this class conteains many different models, not just
   only one like TargetModel. It operates in these sequential steps
