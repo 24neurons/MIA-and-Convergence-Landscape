@@ -11,9 +11,9 @@ This project is an experiment on membership attack against machine learning mode
 
 ## Documentation
 
-1.[```TargetModel```](src/utils/base_models.py): A target model wrapper class around the actual target model such as vgg19 or resnet20
-  I.e TargetModel(ResNet20) with ResNet20 being the base target model
-  This class functions in these sequential steps
+  1.[```TargetModel```](src/utils/base_models.py): A target model wrapper class around the actual target model such as vgg19 or resnet20
+    I.e TargetModel(ResNet20) with ResNet20 being the base target model
+    This class functions in these sequential steps
 
   * Inserting dataset with format (input, label), both input and label has the type of torch.Tensor
   * Training target model on train_set
