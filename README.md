@@ -12,7 +12,7 @@ This project is an experiment on membership attack against machine learning mode
 ## Documentation
 
 1.[```TargetModel```](src/utils/base_models.py): A target model wrapper class around the actual target model such as vgg19 or resnet20
-  I.e TargetModel(ResNet20) with ResNet20 being the base target model
+  I.e TargetModel(resnet20) with resnet20 being the base target model
   This class functions in these sequential steps
 
 * Inserting dataset with format (input, label), both input and label has the type of torch.Tensor
@@ -52,8 +52,8 @@ This implementation is implemented based on [Pytorch 1.13.1](https://pytorch.org
 
 Including the dataset supported by the implementation. The dataset will be automatically downloaded into your "data" folder.
 
-* Tabular data: [Purchase Dataset](https://www.kaggle.com/datasets/raosuny/e-commerce-purchase-dataset),
 * Image data : [CIFAR10, CIFAR100](https://www.kaggle.com/datasets/fedesoriano/cifar100)
+               [FashionMNIST](https://www.kaggle.com/zalando-research/fashionmnist)
 
 ## Running experiments
 
@@ -86,5 +86,5 @@ python3 main.py \
 --target_epoch 100
 ```
 
-With the above command, the program will run the experiment on CIFAR10 dataset with ResNet20 as the target model,
+With the above command, the program will run the experiment on CIFAR10 dataset with resnet20 as the target model,
 the executing time running on Kaggle GPU T4x2 is around 1 hour.

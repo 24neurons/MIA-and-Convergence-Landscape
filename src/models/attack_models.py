@@ -10,11 +10,10 @@ class NNTwoLayers(nn.Module):
         super().__init__()
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(num_classes, num_classes),
-            nn.ReLU(),
+            nn.Sigmoid(),
             nn.Linear(num_classes, num_classes),
-            nn.ReLU(),
-            nn.Linear(num_classes, 1),
-            nn.Sigmoid()
+            nn.Sigmoid(),
+            nn.Linear(num_classes, 1)
         )
 
     def forward(self, x):

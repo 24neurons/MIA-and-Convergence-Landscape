@@ -5,13 +5,6 @@ including training/testing step, custom dataset, etc.
 import torch
 from torch.utils.data import Dataset
 
-"""
-This module is mainly supporting tools for all the types of model,
-including training/testing step, custom dataset, etc.
-"""
-import torch
-from torch.utils.data import Dataset
-
 class CustomDataset(Dataset):
     """
     A custom torch Dataset that allows iteration through two rela=ted tensors: input and label
@@ -41,59 +34,79 @@ class CustomDataset(Dataset):
         return (self.X[idx] , self.y[idx])
 
 
-def train_step(model, trainloader, loss_fn, optimizer, index=None):
+def train_step(model, trainloader, loss_fn, optimizer, epsilon=0.01, sharpness=False):
     """
     This function trains a model in one epoch
     Args:
-        model (nn.Module): The model that is going to be trained
+        model : The model that is going to be trained
         trainloader (DataLoader): The training set DataLoader for the target model
         loss_fn : The objective function that the model is configured to minimize
-        optimnizer: The gradient stepping optimizer for the model
-        metric_score_fn: The metric that is used to measure the accuracy, can be F1_score, F2...
-        index: 
-            None: The model shall be trained on the whole training data
-            int: The model shall be trained on the index-th single batch
+        optimizer: The gradient stepping optimizer for the model
     Returns:
-        If index is None:
+        If sharpness = False:
             model (nn.Module): The resuling model after one epoch of training
             train_loss (torch.float32): The training loss of this model over the entire 
                                         training dataset on this epoch
             train_acc (torch.float32):The training score over the entire training dataset
-        If index is int:
+        If sharpness = True:
             model (nn.Module): The resulting model after training on one sample
+            train_loss (torch.float32): The training loss of this model over the entire
+                                        training dataset on this epoch
+            train_acc (torch.float32):The training score over the entire training dataset
+            sharpness (torch.float32): The sharpness of the minima the model is converging to
     """
     model.train()
     train_loss, train_acc = 0,0
-    if index is None:
-        for batch_idx, (X, y) in enumerate(trainloader):
-            X, y = X.to("cuda"), y.to("cuda")
-            optimizer.zero_grad()
-            pred = model(X).squeeze(dim = 1)
-
-            batch_loss = loss_fn(pred, y)
-            train_loss += batch_loss.item()
-            batch_loss.backward()
-            optimizer.step()
-            
-            batch_acc = accuracy_fn(pred, y)
-
-            train_acc += batch_acc.item()
-#             pbar.set_description(desc=f'Loss={batch_loss} Batch_id={batch_idx} Accuracy={100*correct/total:0.2f}')
-    else:
-        #1. Training on a single data
-        X, y = trainloader.dataset[index]
-        X, y = X.to("cuda"), y.to("cuda")
+    global_increase = 0
+    for batch_idx, (X_b, y_b) in enumerate(trainloader):
+        X_b, y_b = X_b.to("cuda"), y_b.to("cuda")
         optimizer.zero_grad()
-        pred = model(X).squeeze(dim = 1)
+        pred = model(X_b).squeeze(dim = 1) 
 
-        batch_loss = loss_fn(pred, y)
+#             softmax_pred = nn.Softmax(dim=1)(pred)
+
+#             print(f"Min pred {torch.log(torch.min(softmax_pred.cpu().detach()))}")
+
+        batch_loss = loss_fn(pred, y_b)
+        train_loss += batch_loss.item()
         batch_loss.backward()
+
+        batch_acc = accuracy_fn(pred, y_b)
+
+        train_acc += batch_acc.item()
+        if sharpness:
+            with torch.no_grad():
+                model_clone = deepcopy(model).to("cuda")
+                grad_norm = 0
+
+                # Calculate the gradient norm
+                for param in model.parameters():
+                    x = param.grad
+                    grad_norm += torch.sum(x**2)
+                # Moving the parameters 0.01 towards the gradient direction
+                grad_norm = sqrt(grad_norm)
+                for ((new, new_param), (old, old_param)) in zip(model_clone.named_parameters(), model.tg.named_parameters()):
+                        new_param.data = old_param.data + epsilon * old_param.grad / grad_norm
+                
+                next_pred = model_clone(X_b).squeeze(dim = 1)
+                next_loss = loss_fn(next_pred, y_b)
+
+                # Calculating the increase in loss
+                local_increase = next_loss - batch_loss
+                global_increase += local_increase.item()
+            
         optimizer.step()
-        
-        return model
+    
+    # Average the quantity over the entire dataset
+    global_increase /= len(trainloader)
     train_loss /= len(trainloader)
     train_acc /= len(trainloader)
+    
+    if sharpness:
+        return model, train_loss, train_acc, global_increase
     return model, train_loss, train_acc
+        
+#             pbar.set_description(desc=f'Loss={batch_loss} Batch_id={batch_idx} Accuracy={100*correct/total:0.2f}')
 def test_step(model, testloader, loss_fn):
     """
     This function calculate the test error of a model
@@ -101,7 +114,9 @@ def test_step(model, testloader, loss_fn):
         model (nn.Module): The model that is going to be tested
         testloader (nn.Module): The test dataloader of the model
         loss_fn: The objective function that should be minimized by the model
-        metric_score_fn: The metric that is used to measure accuracy, such as F1_score, recall, etc.
+    Returns:
+        test_loss (torch.float32): The test loss of the model on the test dataset
+        test_acc (torch.float32): The test accuracy of the model on the test dataset
     """
     test_loss, test_acc = 0,0
     model.eval()
@@ -150,22 +165,13 @@ def gather_inference(model, dataloader):
     input_labels = torch.cat(input_labels, dim = 0)
 
     return (input_labels, pred_labels)
+
 def accuracy_fn(pred, y):
-    """
-    Calculate the accuracy of the model
-    Args:
-        pred (torch.Tensor): The prediction of the model
-        y (torch.Tensor): The true label of the dataset
-    Returns:
-        acc (torch.float32): The accuracy of the model
-    """
     # if y has more than two labels
     if len(y.shape) > 1:
         pred_label = pred.argmax(dim = 1)
         y_label = y.argmax(dim = 1)
-    # if y has only two labels
     else:
-        pred_label = torch.round(pred)
+        pred_label = torch.round(nn.Sigmoid()(pred))
         y_label = y
-    acc = ((pred_label == y_label).sum()/len(y_label)).float()
-    return acc
+    return ((pred_label == y_label).sum()/len(y_label)).float()
