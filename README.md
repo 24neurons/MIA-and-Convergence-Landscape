@@ -11,7 +11,7 @@ This project is an experiment on membership attack against machine learning mode
 
 ## Documentation
 
-1.[```TargetModel```](src/utils/base_models.py): A target model wrapper class around the actual target model such as vgg19 or resnet20
+1.[```TargetModel```](src/utils/base_wrapper.py): A target model wrapper class around the actual target model such as vgg19 or resnet20
   I.e TargetModel(ResNet20) with ResNet20 being the base target model
   This class functions in these sequential steps
 
@@ -26,14 +26,14 @@ This project is an experiment on membership attack against machine learning mode
     ```math
     sharpness = \frac{\text{increases in loss}}{\text{increases in weight}}
     ```
-2. [```ShadowModel```](src/utils/base_models.py): A shadow model wrapper for a list of shadow models (nModels), with the same architecture with base target model
+2. [```ShadowModel```](src/utils/base_wrapper.py): A shadow model wrapper for a list of shadow models (nModels), with the same architecture with base target model
   This class also functions in similar manner with the TargetModel, only that this class conteains many different models, not just
   only one like TargetModel. It operates in these sequential steps
 
 * Inserting dataset with the same format as TargetModel
 * Dividing the inserted dataset into n_models distinct set with equal size ```train_size```
 
-3. [```AttackModel```](src/utils/base_models.py): An attacker model wrapper around the attack models (nModels), with each model is used to attack on different labels
+3. [```AttackModel```](src/utils/base_wrapper.py): An attacker model wrapper around the attack models (nModels), with each model is used to attack on different labels
   I.e If the original dataset contains 10 labels, then AttackModel, then AttackModel contains 10 different sub attack model.
   The class allows:
 
@@ -41,7 +41,7 @@ This project is an experiment on membership attack against machine learning mode
 * Train the ith attack model on the ith dataset of the provided dataset
 * Generating the membership status when being provided true label and model prediction
 
-4. [```FullAttacker```](src/images/cifar/main.py): This class intergrates all the above class into one and performs attacking action
+4. [```FullAttacker```](src/main.py): This class intergrates all the above class into one and performs attacking action
 
 ## Requirements
 
