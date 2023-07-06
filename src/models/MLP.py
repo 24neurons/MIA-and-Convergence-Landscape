@@ -1,5 +1,5 @@
 from torch import nn
-class MLPImage(nn.Module):
+class MLP(nn.Module):
     def __init__(self, in_channels = 3, num_classes=10):
         super().__init__()
         self.Flatten = nn.Flatten()
