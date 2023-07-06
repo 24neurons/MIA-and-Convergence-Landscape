@@ -1,5 +1,2 @@
-torch=1.13.1
-numpy=1.17.2
-pickle=4.0
-pandas=0.25.1
-torchvision=0.4.2
+torch==2.0.0
+torchvision==0.15.1

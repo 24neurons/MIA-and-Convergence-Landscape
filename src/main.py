@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from torchvision.transforms import ToTensor
 
-from models import attack_models, resnet, vgg, MLP
+from models import attack_models, resnet18, vgg11, MLP
 
 
 FILE_DIR = os.path.dirname(os.path.abspath(__file__))
