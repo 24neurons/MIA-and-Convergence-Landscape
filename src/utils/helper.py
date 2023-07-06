@@ -4,6 +4,9 @@ including training/testing step, custom dataset, etc.
 """
 import torch
 from torch.utils.data import Dataset
+from torch import nn
+from copy import deepcopy
+from math import sqrt 
 
 class CustomDataset(Dataset):
     """
@@ -85,7 +88,7 @@ def train_step(model, trainloader, loss_fn, optimizer, epsilon=0.01, sharpness=F
                     grad_norm += torch.sum(x**2)
                 # Moving the parameters 0.01 towards the gradient direction
                 grad_norm = sqrt(grad_norm)
-                for ((new, new_param), (old, old_param)) in zip(model_clone.named_parameters(), model.tg.named_parameters()):
+                for ((new, new_param), (old, old_param)) in zip(model_clone.named_parameters(), model.named_parameters()):
                         new_param.data = old_param.data + epsilon * old_param.grad / grad_norm
                 
                 next_pred = model_clone(X_b).squeeze(dim = 1)

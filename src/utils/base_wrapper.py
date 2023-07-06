@@ -7,7 +7,6 @@ import numpy as np
 
 from torch import nn
 from torch.utils.data import DataLoader
-from torchmetrics.classification import BinaryAccuracy
 from tqdm.auto import tqdm
 from copy import deepcopy
 from .helper import CustomDataset, train_step, test_step, gather_inference
@@ -16,13 +15,13 @@ TARGET_BATCH_SIZE = 64
 TARGET_EPOCHS = 150
 
 SHADOW_BATCH_SIZE = 128
-SHADOW_LR = 0.01
+SHADOW_LR = 0.006
 SHADOW_EPOCHS = 150
 
 
 
 class TargetModel:
-    def __init__(self, base_target):
+    def __init__(self, base_target, **kwargs):
         """
         The target model wrapper for base target model
         Attributes: 
@@ -30,7 +29,7 @@ class TargetModel:
             trainloader (DataLoader): The dataloader for training dataset
             testloader (TestLoader):The testdataloader for test dataset
         """
-        self.tg = base_target
+        self.tg = base_target(**kwargs).to("cuda")
         self.trainloader = None
         self.testloader = None
         self.sharpness = 0
@@ -286,7 +285,7 @@ class ShadowModel:
         return (shadow_in_true_label , shadow_in_prediction, shadow_out_true_label , shadow_out_prediction)
 
     
-    def fit_transform(self, X , y, train_size, numIter):
+    def fit_transform(self, X , y, train_size, numIter=SHADOW_EPOCHS):
         """Train shadow model on a custom dataset, then generate training dataset
           into different classes for attacker model
 
@@ -340,7 +339,7 @@ class AttackModel:
     """
        The attacker class used to attack the target model
     """
-    def __init__(self, base_attacker, num_classes):
+    def __init__(self, attack_arc, num_classes=10):
         """Constructing attack models
 
             Args: 
@@ -353,7 +352,7 @@ class AttackModel:
 
         """
         self.list_of_models = []
-        self.base_model = base_attacker
+        self.base_model = attack_arc(num_classes=num_classes)
         self.num_classes = num_classes
         self.train_dataloaders = []
 
@@ -373,7 +372,7 @@ class AttackModel:
             train_X, train_y = attack_train_data[cur_class]
             train_datasets = CustomDataset(train_X, train_y)
             train_dataloader = DataLoader(train_datasets,
-                                            batch_size = 64,
+                                            batch_size = 128,
                                             shuffle = True)
             self.train_dataloaders.append(train_dataloader)
 
@@ -396,9 +395,10 @@ class AttackModel:
         for cur_class in range(self.num_classes):
 
             # 2. Preparing loss function and optimizer
-            cur_model = self.list_of_models[cur_class]
+            cur_model = self.list_of_models[cur_class].to("cuda")
+            # print(cur_model)
             loss_fn = nn.CrossEntropyLoss()
-            optimizer = torch.optim.SGD(cur_model.parameters(), lr = 0.005, weight_decay = 5e-6)
+            optimizer = torch.optim.SGD(cur_model.parameters(), lr = 0.001, weight_decay = 5e-6)
             train_dataloader = self.train_dataloaders[cur_class]
 
             # 3. Train current model on shadow model's membership data
