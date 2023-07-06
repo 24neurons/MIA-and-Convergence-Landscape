@@ -123,11 +123,14 @@ class FullAttacker():
 
         tg_train_losses, tg_test_losses = [], []
         tg_train_accs, tg_test_accs = [], []
+        print("Training shadow models")
         # 1. Train shadow models and generate data for attacker
         shadow_attack_data = self.sm.fit_transform(self.shadow_X, self.shadow_y, self.args.target_size,self.args.target_epoch)
         # 2. Train attacker model based on shadow models labeled data, default 50 epochs
+        print("Training attack model")
         self.at.fit(shadow_attack_data, 50)
         # 3. Evaluate the attacker model on target model per each epoch
+        print("Training target model")
 
         for _ in range(self.args.target_epoch):
             # 3.1 Train target model and generate data for attacker
