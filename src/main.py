@@ -15,7 +15,8 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from torchvision.transforms import ToTensor
 
-from models import attack_models, resnet18, vgg11, MLP
+from models import attack_models, resnet, resnet18, vgg, vgg11, MLP, NNTwoLayers
+from utils import train_step, test_step, accuracy_fn
 
 
 FILE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,10 +36,10 @@ def parse_arguments():
     parser.add_argument('--target_model', type=str, help="Target model architecture's name", 
                         default='resnet18', choices=['resnet20', 'resnet50',  'vgg11', 'vgg11_bn', 'vgg13', 
                                                      'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19',])
-    parser.add_argument('--target_size', type=int, help="Number of training samples for target model")
-    parser.add_argument('--target_lr', type=float, help="Learning rate of target model")
+    parser.add_argument('--target_size', type=int, default=6000, help="Number of training samples for target model")
+    parser.add_argument('--target_lr', type=float, default=0.01, help="Learning rate of target model")
     parser.add_argument('--target_epoch', type=int, help="Epochs of the target model", default=150)
-    parser.add_argument('--attacker_arc', type = str, help="Attacker model architecture's name",
+    parser.add_argument('--attack_arc', type = str, help="Attacker model architecture's name",
                         default="NNTwoLayers")
     args = parser.parse_args()
     
@@ -63,7 +64,7 @@ class FullAttacker():
 
         # Query the name of target model by the argument string
         target_model_archiecture = globals()[self.args.target_model]
-        attack_model_architecture = globals()[self.args.attack_model]
+        attack_model_architecture = globals()[self.args.attack_arc]
 
         self.tm = TargetModel(target_model_archiecture, in_channels = self.in_channels,
                               num_classes = self.num_classes)
@@ -71,8 +72,7 @@ class FullAttacker():
         self.sm = ShadowModel(target_model_archiecture, in_channels = self.in_channels,
                               num_classes = self.num_classes)
         
-        self.at = AttackModel(attack_model_architecture, in_channels = self.in_channels,
-                              num_classes = self.num_classes)
+        self.at = AttackModel(attack_model_architecture, num_classes = self.num_classes)
         self._data_preprocess()
         self._divide_data()
 
@@ -113,8 +113,8 @@ class FullAttacker():
 
         # Divide the data into target and shadow
         rng = np.random.RandomState(1)
-        target_indices = rng.choice(range(len(self.X)), size = target_size, replace=False)
-        shadow_indices = np.array(list(set(range(len(self.X))) - set(target_indices)))
+        target_indices = rng.choice(np.arange(len(self.X)), size=2*target_size)
+        shadow_indices = list(set(np.arange(len(self.X))) - set(target_indices))
 
         self.target_X, self.target_y = self.X[target_indices], self.y[target_indices]
         self.shadow_X, self.shadow_y = self.X[shadow_indices], self.y[shadow_indices]
@@ -124,7 +124,7 @@ class FullAttacker():
         tg_train_losses, tg_test_losses = [], []
         tg_train_accs, tg_test_accs = [], []
         # 1. Train shadow models and generate data for attacker
-        shadow_attack_data = self.sm.fit_transform(self.shadow_X, self.shadow_y, self.args.target_epoch)
+        shadow_attack_data = self.sm.fit_transform(self.shadow_X, self.shadow_y, self.args.target_size,self.args.target_epoch)
         # 2. Train attacker model based on shadow models labeled data, default 50 epochs
         self.at.fit(shadow_attack_data, 50)
         # 3. Evaluate the attacker model on target model per each epoch
@@ -145,11 +145,11 @@ class FullAttacker():
                 tg_test_accs.append(tg_test_acc)
 
             # 3.3 Estimating model sharpness on current weights
-            sharpness = self.tg.sharpness
+            sharpness = self.tm.sharpness
             print(f"Sharpness: {sharpness:.4f}")
 
             # 3.4 Evaluating the attacker model on target model 
-            attack_acc = self.at.eval(target_attack_data)
+            attack_acc = self.at.eval_attack(target_attack_data)
             print(f"With learning rate {self.args.target_lr}, attacking on epoch {_}, with accuracy {attack_acc:.4f}")
             
             # 3.5 If the model is reaching plateau, then stop training
