@@ -24,7 +24,7 @@ This project is an experiment on membership attack against machine learning mode
     On each random samples, train the model further, getting the weights and loss values of the new model.
     Calculate the sharpness of the model on current weight with the formula :
     ```math
-    sharpness = \frac{\text{increases in loss}}{\text{increases in weight}}
+    sharpness = \frac{\text{increases in loss}}{\text{loss + 1}}
     ```
 2. [```ShadowModel```](src/utils/base_wrapper.py): A shadow model wrapper for a list of shadow models (nModels), with the same architecture with base target model
   This class also functions in similar manner with the TargetModel, only that this class conteains many different models, not just
